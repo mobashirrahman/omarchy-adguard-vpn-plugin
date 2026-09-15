@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# AdGuard VPN status - glance + data for the bar widget.
+# Outputs Waybar-style JSON. No sudo needed (status is unprivileged).
+set -uo pipefail
+
+CLI="/usr/bin/adguardvpn-cli"
+
+raw="$("$CLI" status 2>&1 || true)"
+# Strip ANSI colors
+clean="$(printf '%s' "$raw" | sed -r 's/\x1B\[[0-9;]*m//g')"
+
+if printf '%s' "$clean" | grep -qi '^Connected to'; then
+  # e.g. "Connected to BRUSSELS in TUN mode, running on tun0"
+  loc="$(printf '%s' "$clean" | sed -n 's/^Connected to \([^ ]*\).*/\1/p' | head -n 1)"
+  [ -z "$loc" ] && loc="ON"
+  # Title-case location for bar: BRUSSELS -> Brussels
+  pretty="$(printf '%s' "$loc" | awk '{print toupper(substr($0,1,1)) tolower(substr($0,2))}')"
+  printf '{"text":"󰖂 %s","tooltip":"AdGuard VPN: connected to %s (click to disconnect)","class":"active"}\n' "$pretty" "$pretty"
+else
+  printf '{"text":"󰖂 OFF","tooltip":"AdGuard VPN: disconnected (click to connect)","class":"inactive"}\n'
+fi

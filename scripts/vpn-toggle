@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# AdGuard VPN toggle - left-click on the bar widget.
+# Connected -> disconnect. Disconnected -> connect to last location.
+# Both directions go through the passwordless-sudo root helper
+# (one-time setup: scripts/vpn-setup-passwordless.sh in this plugin)
+# because the VPN daemon runs as root and the CLI's own sudo needs a TTY.
+set -uo pipefail
+
+CLI="/usr/bin/adguardvpn-cli"
+WRAPPER="/usr/local/bin/adguardvpn-bar-connect"
+SETUP_SCRIPT="$(dirname "$0")/vpn-setup-passwordless.sh"
+
+notify() {
+  if command -v notify-send >/dev/null 2>&1; then
+    notify-send "AdGuard VPN" "$1" 2>/dev/null || true
+  fi
+}
+
+clean="$("$CLI" status 2>&1 | sed -r 's/\x1B\[[0-9;]*m//g' || true)"
+
+if printf '%s' "$clean" | grep -qi '^Connected to'; then
+  if sudo -n "$WRAPPER" disconnect >/dev/null 2>&1; then
+    notify "Disconnected"
+  elif "$CLI" disconnect >/dev/null 2>&1; then
+    notify "Disconnected"
+  else
+    notify "Disconnect failed (needs auth)"
+  fi
+else
+  # -y = auto-yes, --no-progress = no interactive spinner/questions.
+  # Uses last used location so no location prompt.
+  if sudo -n "$WRAPPER" connect >/dev/null 2>&1; then
+    notify "Connected"
+  elif "$CLI" connect -y --no-progress >/dev/null 2>&1; then
+    notify "Connected"
+  else
+    notify "Connect needs one-time setup - run in terminal: $SETUP_SCRIPT"
+  fi
+fi

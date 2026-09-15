@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# AdGuard VPN location picker - right-click on the bar widget.
+# Lists every AdGuard VPN location via the Omarchy searchable menu, then
+# connects to whichever city is picked. Uses the same passwordless-sudo
+# wrapper as vpn-toggle (one-time setup: vpn-setup-passwordless.sh).
+set -uo pipefail
+
+CLI="/usr/bin/adguardvpn-cli"
+WRAPPER="/usr/local/bin/adguardvpn-bar-connect"
+SETUP_SCRIPT="$(dirname "$0")/vpn-setup-passwordless.sh"
+
+notify() {
+  if command -v notify-send >/dev/null 2>&1; then
+    notify-send "AdGuard VPN" "$1" 2>/dev/null || true
+  fi
+}
+
+raw="$("$CLI" list-locations 2>&1 | sed -r 's/\x1B\[[0-9;]*m//g')"
+
+# Fixed-width columns (ISO / COUNTRY / CITY / PING); offsets read off the
+# header row so this survives country/city names with spaces.
+options="$(printf '%s\n' "$raw" | awk '
+  NR==1 {
+    country_pos = index($0, "COUNTRY") - 1
+    city_pos = index($0, "CITY") - 1
+    ping_pos = index($0, "PING") - 1
+    next
+  }
+  {
+    iso = substr($0, 1, country_pos)
+    country = substr($0, country_pos+1, city_pos-country_pos)
+    city = substr($0, city_pos+1, ping_pos-city_pos)
+    ping = substr($0, ping_pos+1)
+    gsub(/^[ \t]+|[ \t]+$/, "", iso)
+    gsub(/^[ \t]+|[ \t]+$/, "", country)
+    gsub(/^[ \t]+|[ \t]+$/, "", city)
+    gsub(/^[ \t]+|[ \t]+$/, "", ping)
+    # icon<TAB>label<TAB>subtext - icon left blank; omarchy-menu-select
+    # misparses a bare "label<TAB>subtext" pair as "icon<TAB>label" instead.
+    if (city != "") printf "\t%s\t%s (%s) - ~%sms\n", city, country, iso, ping
+  }
+')"
+
+if [ -z "$options" ]; then
+  notify "Could not load locations"
+  exit 1
+fi
+
+selection="$(printf '%s\n' "$options" | omarchy-menu-select "Connect to VPN location" -- --width 480)"
+[ -n "$selection" ] || exit 0
+
+city="${selection%%$'\t'*}"
+[ -n "$city" ] || exit 0
+
+if sudo -n "$WRAPPER" connect -l "$city" >/dev/null 2>&1; then
+  notify "Connected to $city"
+elif "$CLI" connect -y --no-progress -l "$city" >/dev/null 2>&1; then
+  notify "Connected to $city"
+else
+  notify "Connect to $city failed - run one-time setup: $SETUP_SCRIPT"
+fi
